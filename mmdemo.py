@@ -114,29 +114,6 @@ def readAndParseData(Dataport):
     byteVec = np.frombuffer(readBuffer, dtype='uint8')
     framedata = []
     # print(len(byteVec))
-    # --------------------------------For vital sign-----------------------------------------------------------------------
-    # if np.all(byteVec[0:8] == magicWord):
-    #     if len(readBuffer) % 288 == 0:
-    #         Blist = []
-    #         Hlist = []
-    #         numframes = []
-    #         for i in range(len(readBuffer)//288):
-    #             subFrameNum = struct.unpack('I',readBuffer[i*288+20:i*288+24])[0]
-    #             # Tlvtype = struct.unpack('I',readBuffer[i*288+40:i*288+44])[0]
-    #             # Tlvlen = struct.unpack('I',readBuffer[i*288+44:i*288+48])[0]
-    #             BreathEst_FFT = struct.unpack('f',readBuffer[i*288+48+44:i*288+48+48])[0]# 48:frameHeader and type/len bytes 288:maxPacketlen
-    #             HeartEst_FFT = struct.unpack('f',readBuffer[i*288+48+28:i*288+48+32])[0]
-    #             print("numFrame: ",subFrameNum,"Breath: ",round(BreathEst_FFT),'s/min',"Heart: ",round(HeartEst_FFT),'s/min')
-    #             Blist.append(BreathEst_FFT)
-    #             Hlist.append(HeartEst_FFT)
-    #             numframes.append(subFrameNum)
-    #
-    #         return Blist,Hlist,numframes
-    # else:
-    #     return [],[],[]
-    # #
-    #     print(struct.unpack('I',readBuffer[20:24]),struct.unpack('I',readBuffer[308:312]))
-    #     # print("Fnum:",subFrameNum,"length:",totalPacketlen)
 
     # --------------------------------For point cloud-----------------------------------------------------------------------
     if np.all(byteVec[0:8] == magicWord):
@@ -216,12 +193,11 @@ def stack_data(frames, x, y, z):
         input_2[11, :, :] = y
         input_3[0:11, :, :] = input_3[1:12, :, :]
         input_3[11, :, :] = z
-        # 檢查前移是否正確
 
+        # 檢查前移是否正確
         # print(np.sum(input_1[0:11,:,:]))
         # print(np.sum(input_1[1:12,:,:]))
         # print(np.sum(x))
-        # print(np.sum(input_1))
 
         # print("xy: ",np.sum(input_1),"y_z: ",np.sum(input_2),"z_x: ",np.sum(input_3))
 
@@ -244,21 +220,24 @@ def prediction(input_1, input_2, input_3):
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
 
-    # print(input_details[0]['name'])
-    # print(input_details[1]['name'])
-    # print(input_details[2]['name'])
-    # print(output_details)
-    # print("i1: ",input_1.shape,"i2: ",input_2.shape,"i3: ",input_3.shape)
+
+    # print("Output details:",output_details[0])
+
+    # print("Intput details:{}\n{}\n{}".format(input_details[0],input_details[1],input_details[2]))
+    # Data astype to float32
     input_1 = input_1.astype('float32')
     input_2 = input_2.astype('float32')
     input_3 = input_3.astype('float32')
 
+    #Set tensor (3 input)
     interpreter.set_tensor(input_details[0]['index'], input_2)
     interpreter.set_tensor(input_details[1]['index'], input_3)
     interpreter.set_tensor(input_details[2]['index'], input_1)
 
+    #inference
     interpreter.invoke()
 
+    #get results(probability)
     output_data = interpreter.get_tensor(output_details[0]['index'])
 
     return (classes[np.argmax(output_data)])
@@ -266,7 +245,6 @@ def prediction(input_1, input_2, input_3):
 
 def demo():
     configFileName = "./6843_pplcount_debug.cfg"
-    # configFileName = "./xwr1642_profile_VitalSigns_20fps_Front.cfg"
     dataPortName = "COM22"
     userPortName = "COM12"
 
@@ -280,13 +258,6 @@ def demo():
                 stack_data(numframes, x, y, z)
             else:
                 continue
-            # ---------------------------------------vital sign---------------------------------------------------------------------
-            # Blist,Hlist,numframes = readAndParseData(Dataport)
-            # with open('./log.txt','a') as f:
-            #     seq = [str(numframes),',',str(Blist),',',str(Hlist),'\n']
-            #     f.writelines(seq)
-            #     f.close()
-            # ----------------------------------------------------------------------------------------------------------------------
             time.sleep(0.07)  # Sampling frequency of 30 Hz
         except KeyboardInterrupt:
             Dataport.close()  # 清除序列通訊物件
@@ -298,9 +269,4 @@ def demo():
 
 if __name__ == "__main__":
     demo()
-    # prediction([],[],[])
-    # app = QtWidgets.QApplication(sys.argv)
-    # window = QtWidgets.QWidget();
-    # window.show()
-    # sys.exit(app.exec_())
-    # test()
+
