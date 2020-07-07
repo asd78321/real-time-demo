@@ -2,22 +2,16 @@ import serial
 import time
 import numpy as np
 import struct
-import socket
 
 import tensorflow as tf
-import sys
 
-global CLIport, Dataport
-CLIport = {}
-Dataport = {}
-byteBuffer = np.zeros(2 ** 15, dtype='uint8')
-byteBufferLength = 0
-dataBin = [None] * 288
-magicWord = [2, 1, 4, 3, 6, 5, 8, 7]
+# global CLIport, Dataport
+# CLIport = {}
+# Dataport = {}
 
-input_1 = np.zeros([12, 120, 50])
-input_2 = np.zeros([12, 50, 120])
-input_3 = np.zeros([12, 120, 120])
+
+
+
 
 
 # ------------------------------------------------------------------
@@ -26,7 +20,7 @@ input_3 = np.zeros([12, 120, 120])
 def serialConfig(configFileName, dataPortName, userPortName):
     try:
         cliPort = serial.Serial(userPortName, 115200)
-        dataPort = serial.Serial(dataPortName, 921600, timeout=0.04)
+        dataPort = serial.Serial(dataPortName, 921600, timeout=0.08)# this timeout for buffer's updating transfer rate too slowly by serial port
     except serial.SerialException as se:
         print("Serial Port 0ccupied,error = ")
         print(str(se))
@@ -44,7 +38,7 @@ def serialConfig(configFileName, dataPortName, userPortName):
 
 # 定義空間
 def voxalize(x_points, y_points, z_points, x, y, z):
-    # voxel切割大小修改爲（120，50，120） 叠加frame數量修改為12
+    # voxel切割大小修改爲（50,30,50） 叠加frame數量修改為12 sliding window's offset為3
     # 定義房間大小
     x_min = -3
     x_max = 3
@@ -58,14 +52,8 @@ def voxalize(x_points, y_points, z_points, x, y, z):
     z_res = (z_max - z_min) / z_points
     y_res = (y_max - y_min) / y_points
     x_res = (x_max - x_min) / x_points
-    # if z_min == z_max:
-    #     z_res = 1
-    # if y_min == y_max:
-    #     y_res = 1
-    # if x_min == x_max:
-    #     x_res = 1
 
-    #     新方法求取矩陣點
+    # new method for Feature-matrix
 
     pixel_x_y = np.zeros([x_points * y_points])
     pixel_y_z = np.zeros([z_points * y_points])
@@ -116,15 +104,19 @@ def readAndParseData(Dataport):
     # print(len(byteVec))
 
     # --------------------------------For point cloud-----------------------------------------------------------------------
-    if np.all(byteVec[0:8] == magicWord):
+    if np.all(byteVec[0:8] == magicWord) and len(readBuffer)>52:
         subFrameNum = struct.unpack('I', readBuffer[24:28])[0]
         numTLVs = struct.unpack('h', readBuffer[48:50])[0]
         typeTLV = struct.unpack('I', readBuffer[52:56])[0]
-        lenTLv = struct.unpack('I', readBuffer[56:60])[0]  # include length of tlvHeader(8bytes)
-        numPoints = (lenTLv - 8) // 20
+        lenTLV = struct.unpack('I', readBuffer[56:60])[0]  # include length of tlvHeader(8bytes)
+        numPoints = (lenTLV - 8) // 20
         # print("frames: ",subFrameNum,"numTLVs:",numTLVs,"type:",typeTLV,"length:",lenTLv,'numPoints:',numPoints)
-        Startidx = 60  # TLVpointCLOUD start index
-        # print(range(numPoints))
+        PointcloudLength = 20
+
+        # TLVpointCLOUD start index
+        HeaderLength = 52
+        Typelength = 8
+
         if typeTLV == 6 and numPoints > 0:
             # Initialize variables
             x = []
@@ -137,128 +129,132 @@ def readAndParseData(Dataport):
             doppler_list = []
             for numP in range(numPoints):
                 try:
-                    Prange = struct.unpack('f', readBuffer[Startidx:Startidx + 4])
-                    azimuth = struct.unpack('f', readBuffer[Startidx + 4:Startidx + 8])
-                    elevation = struct.unpack('f', readBuffer[Startidx + 8:Startidx + 12])
-                    doppler = struct.unpack('f', readBuffer[Startidx + 12:Startidx + 16])
+                    Prange = struct.unpack('f', readBuffer[HeaderLength+Typelength+numP*PointcloudLength:HeaderLength+Typelength+numP*PointcloudLength + 4])
+                    azimuth = struct.unpack('f', readBuffer[HeaderLength+Typelength+numP*PointcloudLength + 4:HeaderLength+Typelength+numP*PointcloudLength + 8])
+                    elevation = struct.unpack('f', readBuffer[HeaderLength+Typelength+numP*PointcloudLength + 8:HeaderLength+Typelength+numP*PointcloudLength + 12])
+                    doppler = struct.unpack('f', readBuffer[HeaderLength+Typelength+numP*PointcloudLength + 12:HeaderLength+Typelength+numP*PointcloudLength + 16])
                     framedata.append(pointClouds)
-                except:
+                except:# Because sometimes the packet's length will not same with the packet's lenTLV
                     continue
-                range_list.append(Prange)
-                azimuth_list.append(azimuth)
-                elevation_list.append(elevation)
-                doppler_list.append(doppler)
+                # spherical coordinate system
+
+                range_list.append(Prange) # range
+                azimuth_list.append(azimuth) # azimuth
+                elevation_list.append(elevation) # elevation
+                doppler_list.append(doppler) # doppler
+
+                # Pack to List with pointCloud(spherical)
                 pointClouds.append([range_list, azimuth_list, elevation_list, doppler_list])
-                Startidx += 20
-            # print("r:", len(range_list), "a:", len(azimuth_list), "e:", len(elevation_list), "d:", len(doppler_list))
+
+            # Cartesian coordinate system
             r = np.multiply(range_list[:], np.cos(elevation_list))
             x = np.multiply(r[:], np.sin(azimuth_list[:]))
             y = np.multiply(r[:], np.cos(azimuth_list[:]))
             z = np.multiply(range_list[:], np.sin(elevation_list))
-            # print("x:",len(x),"y:",len(y),"z:",len(z))
 
-            p_x_y, p_y_z, p_z_x = voxalize(120, 50, 120, x, y, z)
+            # Feature Matrix preprocess(Voxalize)
+            p_x_y, p_y_z, p_z_x = voxalize(50, 30, 50, x, y, z)
+
+            # Frame Data not null from Serial-port
             isnull = 0
-        return subFrameNum, p_x_y, p_y_z, p_z_x, isnull
 
+        return subFrameNum, p_x_y, p_y_z, p_z_x, isnull
     else:
-        subFrameNum = []
-        x = []
-        y = []
-        z = []
         isnull = 1
-        return subFrameNum, x, y, z, isnull
+        return [],[],[],[], isnull
 
     # ----------------------------------------------------------------------------------------------------------------------
 
 
-def stack_data(frames, x, y, z):
-    x = np.reshape(x, (120, 50))
-    y = np.reshape(y, (50, 120))
-    z = np.reshape(z, (120, 120))
-    # print(input_1.size())
+def stack_data(frames, x, y,input_1,input_2):
+
+    x = np.reshape(x, (50, 30)) # Input1 Matrix setup
+    y = np.reshape(y, (30, 50))# Input2 Matrix setup
+
+
+
     if frames < 12:
         input_1[frames, :, :] = x
         input_2[frames, :, :] = y
-        input_3[frames, :, :] = z
-
-        # print("frames: ",frames+1)
-        # print("x: ",np.sum(x),"y: ",np.sum(y),"z: ",np.sum(z))
-
-        # print("xy: ",np.sum(input_1),"y_z: ",np.sum(input_2),"z_x: ",np.sum(input_3))
+        print("Frames:{},stacking...".format(frames))
     else:
+
         input_1[0:11, :, :] = input_1[1:12, :, :]
         input_1[11, :, :] = x
+
         input_2[0:11, :, :] = input_2[1:12, :, :]
         input_2[11, :, :] = y
-        input_3[0:11, :, :] = input_3[1:12, :, :]
-        input_3[11, :, :] = z
-
-        # 檢查前移是否正確
-        # print(np.sum(input_1[0:11,:,:]))
-        # print(np.sum(input_1[1:12,:,:]))
-        # print(np.sum(x))
-
-        # print("xy: ",np.sum(input_1),"y_z: ",np.sum(input_2),"z_x: ",np.sum(input_3))
-
-        N_input_1 = np.reshape(input_1, (1, 12, 120, 50, 1))
-        N_input_2 = np.reshape(input_2, (1, 12, 50, 120, 1))
-        N_input_3 = np.reshape(input_3, (1, 12, 120, 120, 1))
-
-        print("frames: ", frames + 1, "results: ", prediction(N_input_1, N_input_2, N_input_3))
-
-        # print("frames: ", frames + 1)
-        # print("x: ", np.sum(x), "y: ", np.sum(y), "z: ", np.sum(z))
 
 
-def prediction(input_1, input_2, input_3):
+    return input_1,input_2
+
+def model_init():
+
+    # Define Name List of Classified results
     classes = ["st_sit", "sit_st", "sit_lie", "lie_sit", "fall", "grow_up", "other"]
 
-    interpreter = tf.lite.Interpreter(model_path="./converted_model.tflite")
+    # create Interpreter for model
+    interpreter = tf.lite.Interpreter(model_path="./converted_model2.tflite")
     interpreter.allocate_tensors()
 
+    # Model Input/Output Matrix format
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
 
+    print("Output's shape:", output_details[0]['shape'])
+    print("Intput's shape:{}\n{}\n".format(input_details[0]['shape'], input_details[1]['shape']))
 
-    # print("Output details:",output_details[0])
+    # Define Input dimension
+    input_1 = np.zeros([12, 50, 30])
+    input_2 = np.zeros([12, 30, 50])
 
-    # print("Intput details:{}\n{}\n{}".format(input_details[0],input_details[1],input_details[2]))
-    # Data astype to float32
-    input_1 = input_1.astype('float32')
-    input_2 = input_2.astype('float32')
-    input_3 = input_3.astype('float32')
+    return classes,interpreter,input_1,input_2
 
-    #Set tensor (3 input)
-    interpreter.set_tensor(input_details[0]['index'], input_2)
-    interpreter.set_tensor(input_details[1]['index'], input_3)
-    interpreter.set_tensor(input_details[2]['index'], input_1)
+
+def prediction(input_1, input_2,interpreter,classes):
+    # Reshape Input dimension and astype to float32
+    input_1 = np.reshape(input_1, (1, 12, 50, 30, 1)).astype('float32')
+    input_2 = np.reshape(input_2, (1, 12, 30, 50, 1)).astype('float32')
+
+
+    #Set tensor (2 input)
+    interpreter.set_tensor(interpreter.get_input_details()[0]['index'], input_1)
+    interpreter.set_tensor(interpreter.get_input_details()[1]['index'], input_2)
 
     #inference
     interpreter.invoke()
 
     #get results(probability)
-    output_data = interpreter.get_tensor(output_details[0]['index'])
+    output_data = interpreter.get_tensor(interpreter.get_output_details()[0]['index'])
 
-    return (classes[np.argmax(output_data)])
+    return (classes[np.argmax(output_data)]),output_data[0,np.argmax(output_data)]
 
 
 def demo():
     configFileName = "./6843_pplcount_debug.cfg"
-    dataPortName = "COM22"
-    userPortName = "COM12"
+    dataPortName = "COM5"
+    userPortName = "COM10"
 
-    # # Configurate the serial port
+    # Configurate the serial port
     CLIport, Dataport = serialConfig(configFileName, dataPortName, userPortName)
+
+    # Initialize interpreter and Print Input/Output'shape of model
+    classes,interpreter,input_1,input_2= model_init()
+
+    # Main process
     while True:
         try:
-            # time.sleep(0.1)
             numframes, x, y, z, isnull = readAndParseData(Dataport)
             if isnull == 0:
-                stack_data(numframes, x, y, z)
+                input_1,input_2=stack_data(numframes, x, y,input_1,input_2)
+                if numframes>12 and numframes%3==0:
+                    results,probabilty=prediction(input_1, input_2, interpreter, classes)
+                    print("Frames:{}(Offset = 3)\nResults:{}\nProbability:{:.2f}%".format(numframes,results,probabilty*100))
             else:
                 continue
-            time.sleep(0.07)  # Sampling frequency of 30 Hz
+            # print(sum(input_1.flatten()),sum(input_2.flatten()))
+
+            time.sleep(0.08)  # Sampling frequency of 30 Hz
         except KeyboardInterrupt:
             Dataport.close()  # 清除序列通訊物件
             CLIport.write(('sensorStop\n').encode())
@@ -269,4 +265,3 @@ def demo():
 
 if __name__ == "__main__":
     demo()
-
