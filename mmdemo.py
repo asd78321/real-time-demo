@@ -2,13 +2,11 @@ import serial
 import time
 import numpy as np
 import struct
-
+import cv2
 import tensorflow as tf
 
-# global CLIport, Dataport
-# CLIport = {}
-# Dataport = {}
-
+# global parameter
+offset = 3
 
 
 
@@ -157,11 +155,13 @@ def readAndParseData(Dataport):
 
             # Frame Data not null from Serial-port
             isnull = 0
+        else:
+            return [],[],[],[],0,1
 
-        return subFrameNum, p_x_y, p_y_z, p_z_x, isnull
+        return subFrameNum, p_x_y, p_y_z, p_z_x,numPoints, isnull
     else:
         isnull = 1
-        return [],[],[],[], isnull
+        return [],[],[],[],0,isnull
 
     # ----------------------------------------------------------------------------------------------------------------------
 
@@ -229,7 +229,18 @@ def prediction(input_1, input_2,interpreter,classes):
 
     return (classes[np.argmax(output_data)]),output_data[0,np.argmax(output_data)]
 
+def camera_init():
+    cap=cv2.VideoCapture(0)
+    results = "stacking..."
+    probabilty=0
 
+    return cap,results,probabilty
+def demo_camera(cap):
+    while True:
+        ret, Videoframe = cap.read()
+        cv2.imshow("demo", Videoframe)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 def demo():
     configFileName = "./6843_pplcount_debug.cfg"
     dataPortName = "COM5"
@@ -240,20 +251,45 @@ def demo():
 
     # Initialize interpreter and Print Input/Output'shape of model
     classes,interpreter,input_1,input_2= model_init()
+    # Initialize Camera and cv2
+    cap,results,probabilty= camera_init()
+
 
     # Main process
     while True:
+
         try:
-            numframes, x, y, z, isnull = readAndParseData(Dataport)
+            numframes, x, y, z, numPoints,isnull = readAndParseData(Dataport)
             if isnull == 0:
                 input_1,input_2=stack_data(numframes, x, y,input_1,input_2)
-                if numframes>12 and numframes%3==0:
+                ret, Videoframe = cap.read()
+
+                # define Picture/Frame's information
+                cv2.putText(Videoframe,"Frames:{} Points:{}".format(numframes,numPoints), (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1,(0, 0, 0), 2, cv2.LINE_AA)
+                cv2.putText(Videoframe, "Results:", (10, 80),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2, cv2.LINE_AA)
+                cv2.putText(Videoframe,"{}({:.2f}%)".format(results,probabilty*100),(140,80),cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,255),2,cv2.LINE_AA)
+
+
+                if numframes>12 and numframes%offset==0:
+                    cv2.imshow("demo", Videoframe)
                     results,probabilty=prediction(input_1, input_2, interpreter, classes)
-                    print("Frames:{}(Offset = 3)\nResults:{}\nProbability:{:.2f}%".format(numframes,results,probabilty*100))
+                    # print("Frames:{}(Offset = {})\nResults:{}\nProbability:{:.2f}%".format(numframes, offset, results,probabilty * 100))
+                else:
+                    cv2.imshow("demo", Videoframe)
+
+                # leave loop and shutdown
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    cap.release()
+                    cv2.destroyAllWindows()
+                    Dataport.close()  # 清除序列通訊物件
+                    CLIport.write(('sensorStop\n').encode())
+                    CLIport.close()
+                    break
+
             else:
                 continue
             # print(sum(input_1.flatten()),sum(input_2.flatten()))
-
             time.sleep(0.08)  # Sampling frequency of 30 Hz
         except KeyboardInterrupt:
             Dataport.close()  # 清除序列通訊物件
