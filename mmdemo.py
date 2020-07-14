@@ -4,12 +4,10 @@ import numpy as np
 import struct
 import cv2
 import tensorflow as tf
+import matplotlib.pyplot as plt
 
 # global parameter
 offset = 3
-
-
-
 
 
 # ------------------------------------------------------------------
@@ -18,7 +16,8 @@ offset = 3
 def serialConfig(configFileName, dataPortName, userPortName):
     try:
         cliPort = serial.Serial(userPortName, 115200)
-        dataPort = serial.Serial(dataPortName, 921600, timeout=0.08)# this timeout for buffer's updating transfer rate too slowly by serial port
+        dataPort = serial.Serial(dataPortName, 921600,
+                                 timeout=0.08)  # this timeout for buffer's updating transfer rate too slowly by serial port
     except serial.SerialException as se:
         print("Serial Port 0ccupied,error = ")
         print(str(se))
@@ -102,7 +101,7 @@ def readAndParseData(Dataport):
     # print(len(byteVec))
 
     # --------------------------------For point cloud-----------------------------------------------------------------------
-    if np.all(byteVec[0:8] == magicWord) and len(readBuffer)>52:
+    if np.all(byteVec[0:8] == magicWord) and len(readBuffer) > 52:
         subFrameNum = struct.unpack('I', readBuffer[24:28])[0]
         numTLVs = struct.unpack('h', readBuffer[48:50])[0]
         typeTLV = struct.unpack('I', readBuffer[52:56])[0]
@@ -127,19 +126,23 @@ def readAndParseData(Dataport):
             doppler_list = []
             for numP in range(numPoints):
                 try:
-                    Prange = struct.unpack('f', readBuffer[HeaderLength+Typelength+numP*PointcloudLength:HeaderLength+Typelength+numP*PointcloudLength + 4])
-                    azimuth = struct.unpack('f', readBuffer[HeaderLength+Typelength+numP*PointcloudLength + 4:HeaderLength+Typelength+numP*PointcloudLength + 8])
-                    elevation = struct.unpack('f', readBuffer[HeaderLength+Typelength+numP*PointcloudLength + 8:HeaderLength+Typelength+numP*PointcloudLength + 12])
-                    doppler = struct.unpack('f', readBuffer[HeaderLength+Typelength+numP*PointcloudLength + 12:HeaderLength+Typelength+numP*PointcloudLength + 16])
+                    Prange = struct.unpack('f', readBuffer[
+                                                HeaderLength + Typelength + numP * PointcloudLength:HeaderLength + Typelength + numP * PointcloudLength + 4])
+                    azimuth = struct.unpack('f', readBuffer[
+                                                 HeaderLength + Typelength + numP * PointcloudLength + 4:HeaderLength + Typelength + numP * PointcloudLength + 8])
+                    elevation = struct.unpack('f', readBuffer[
+                                                   HeaderLength + Typelength + numP * PointcloudLength + 8:HeaderLength + Typelength + numP * PointcloudLength + 12])
+                    doppler = struct.unpack('f', readBuffer[
+                                                 HeaderLength + Typelength + numP * PointcloudLength + 12:HeaderLength + Typelength + numP * PointcloudLength + 16])
                     framedata.append(pointClouds)
-                except:# Because sometimes the packet's length will not same with the packet's lenTLV
+                except:  # Because sometimes the packet's length will not same with the packet's lenTLV
                     continue
                 # spherical coordinate system
 
-                range_list.append(Prange) # range
-                azimuth_list.append(azimuth) # azimuth
-                elevation_list.append(elevation) # elevation
-                doppler_list.append(doppler) # doppler
+                range_list.append(Prange)  # range
+                azimuth_list.append(azimuth)  # azimuth
+                elevation_list.append(elevation)  # elevation
+                doppler_list.append(doppler)  # doppler
 
                 # Pack to List with pointCloud(spherical)
                 pointClouds.append([range_list, azimuth_list, elevation_list, doppler_list])
@@ -156,22 +159,19 @@ def readAndParseData(Dataport):
             # Frame Data not null from Serial-port
             isnull = 0
         else:
-            return [],[],[],[],0,1
+            return [], [], [], [], 0, 1
 
-        return subFrameNum, p_x_y, p_y_z, p_z_x,numPoints, isnull
+        return subFrameNum, p_x_y, p_y_z, p_z_x, numPoints, isnull
     else:
         isnull = 1
-        return [],[],[],[],0,isnull
+        return [], [], [], [], 0, isnull
 
     # ----------------------------------------------------------------------------------------------------------------------
 
 
-def stack_data(frames, x, y,input_1,input_2):
-
-    x = np.reshape(x, (50, 30)) # Input1 Matrix setup
-    y = np.reshape(y, (30, 50))# Input2 Matrix setup
-
-
+def stack_data(frames, x, y, input_1, input_2):
+    x = np.reshape(x, (50, 30))  # Input1 Matrix setup
+    y = np.reshape(y, (30, 50))  # Input2 Matrix setup
 
     if frames < 12:
         input_1[frames, :, :] = x
@@ -185,11 +185,10 @@ def stack_data(frames, x, y,input_1,input_2):
         input_2[0:11, :, :] = input_2[1:12, :, :]
         input_2[11, :, :] = y
 
+    return input_1, input_2
 
-    return input_1,input_2
 
 def model_init():
-
     # Define Name List of Classified results
     classes = ["st_sit", "sit_st", "sit_lie", "lie_sit", "fall", "grow_up", "other"]
 
@@ -208,78 +207,129 @@ def model_init():
     input_1 = np.zeros([12, 50, 30])
     input_2 = np.zeros([12, 30, 50])
 
-    return classes,interpreter,input_1,input_2
+    return classes, interpreter, input_1, input_2
 
 
-def prediction(input_1, input_2,interpreter,classes):
+def prediction(input_1, input_2, interpreter, classes):
     # Reshape Input dimension and astype to float32
     input_1 = np.reshape(input_1, (1, 12, 50, 30, 1)).astype('float32')
     input_2 = np.reshape(input_2, (1, 12, 30, 50, 1)).astype('float32')
 
-
-    #Set tensor (2 input)
+    # Set tensor (2 input)
     interpreter.set_tensor(interpreter.get_input_details()[0]['index'], input_1)
     interpreter.set_tensor(interpreter.get_input_details()[1]['index'], input_2)
 
-    #inference
+    # inference
     interpreter.invoke()
 
-    #get results(probability)
+    # get results(probability)
     output_data = interpreter.get_tensor(interpreter.get_output_details()[0]['index'])
 
-    return (classes[np.argmax(output_data)]),output_data[0,np.argmax(output_data)]
+    return (classes[np.argmax(output_data)]), output_data[0, np.argmax(output_data)]
+
 
 def camera_init():
-    cap=cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(0)
     results = "stacking..."
-    probabilty=0
+    probabilty = 0
+    pos_state = "normal"
+    fontcolor = (255, 255, 255)
+    return cap, results, probabilty, pos_state, fontcolor
 
-    return cap,results,probabilty
+
 def demo_camera(cap):
     while True:
         ret, Videoframe = cap.read()
         cv2.imshow("demo", Videoframe)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
+
+
+def check_results(new_results, new_probability, results, probability, pos_state, fontcolor):
+    classes = ["st_sit", "sit_st", "sit_lie", "lie_sit", "fall", "grow_up", "other"]
+
+    pos_states = ["normal", "Warning", "alert"]
+    fontcolors = [(255, 255, 255), (0, 255, 255), (0, 0, 255)]  # white/ yellow/ red
+    if new_probability >= 0.6:
+        results = new_results
+        probability = new_probability
+        if new_results == classes[1] or new_results == classes[5]:
+            pos_state = pos_states[1]
+            fontcolor = fontcolors[1]
+        elif new_results == classes[4]:
+            pos_state = pos_states[2]
+            fontcolor = fontcolors[2]
+        else:
+            pos_state = pos_states[0]
+            fontcolor = fontcolors[0]
+
+    return results, probability, pos_state, fontcolor
+
+
+def plot_state(plot_data, plot_raw_data, savename, classes):
+
+
+    plt.plot(np.arange(len(plot_data)), plot_data,color = 'red',label = 'checked')
+    plt.plot(np.arange(len(plot_raw_data)), plot_raw_data,color = 'b',label = 'Unhecked')
+    plt.yticks(range(1, 8), classes)
+    plt.ylim([0.0, 8.0])
+    plt.xlabel("Frames")
+    plt.legend()
+    plt.grid()
+    plt.savefig(savename)
+
+
 def demo():
     configFileName = "./6843_pplcount_debug.cfg"
     dataPortName = "COM5"
     userPortName = "COM10"
+    plot_data = []  # checked results
+    plot_raw_data = []  # unchecked results
+    savename = './plot.png'
 
     # Configurate the serial port
     CLIport, Dataport = serialConfig(configFileName, dataPortName, userPortName)
 
     # Initialize interpreter and Print Input/Output'shape of model
-    classes,interpreter,input_1,input_2= model_init()
+    classes, interpreter, input_1, input_2 = model_init()
     # Initialize Camera and cv2
-    cap,results,probabilty= camera_init()
-
+    cap, results, probabilty, pos_state, fontcolor = camera_init()
 
     # Main process
     while True:
-
         try:
-            numframes, x, y, z, numPoints,isnull = readAndParseData(Dataport)
+            numframes, x, y, z, numPoints, isnull = readAndParseData(Dataport)
             if isnull == 0:
-                input_1,input_2=stack_data(numframes, x, y,input_1,input_2)
+
+                input_1, input_2 = stack_data(numframes, x, y, input_1, input_2)
                 ret, Videoframe = cap.read()
 
                 # define Picture/Frame's information
-                cv2.putText(Videoframe,"Frames:{} Points:{}".format(numframes,numPoints), (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1,(0, 0, 0), 2, cv2.LINE_AA)
+                cv2.putText(Videoframe, "Frames:{} Points:{}".format(numframes, numPoints), (10, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
                 cv2.putText(Videoframe, "Results:", (10, 80),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2, cv2.LINE_AA)
-                cv2.putText(Videoframe,"{}({:.2f}%)".format(results,probabilty*100),(140,80),cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,255),2,cv2.LINE_AA)
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(Videoframe, "{}({:.2f}%) {}".format(results, probabilty * 100, pos_state), (140, 80),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, fontcolor, 2, cv2.LINE_AA)
 
-
-                if numframes>12 and numframes%offset==0:
+                if numframes > 11 and numframes % offset == 0:
                     cv2.imshow("demo", Videoframe)
-                    results,probabilty=prediction(input_1, input_2, interpreter, classes)
-                    # print("Frames:{}(Offset = {})\nResults:{}\nProbability:{:.2f}%".format(numframes, offset, results,probabilty * 100))
+                    new_results, new_probabilty = prediction(input_1, input_2, interpreter, classes)
+                    plot_raw_data.append((np.where(np.array(classes) == new_results)[0][0]) + 1)
+                    results, probabilty, pos_state, fontcolor = check_results(new_results, new_probabilty, results,
+                                                                              probabilty, pos_state, fontcolor)
+                    plot_data.append((np.where(np.array(classes) == results)[0][0]) + 1)
                 else:
                     cv2.imshow("demo", Videoframe)
-
+                    if results == "stacking...":
+                        plot_data.append(0)
+                        plot_raw_data.append(0)
+                    else:
+                        plot_data.append((np.where(np.array(classes) == results)[0][0]) + 1)
+                        plot_raw_data.append((np.where(np.array(classes) == new_results)[0][0]) + 1)
                 # leave loop and shutdown
                 if cv2.waitKey(1) & 0xFF == ord('q'):
+                    plot_state(plot_data, plot_raw_data, savename, classes)
                     cap.release()
                     cv2.destroyAllWindows()
                     Dataport.close()  # 清除序列通訊物件
