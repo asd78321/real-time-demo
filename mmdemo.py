@@ -5,12 +5,26 @@ import struct
 import cv2
 import tensorflow as tf
 import matplotlib.pyplot as plt
+from sklearn import *
 
 # global parameter
 offset = 3
 
 
 # ------------------------------------------------------------------
+def dbfilter(raw_data):
+    index_erro_point = np.squeeze(np.where(np.array(raw_data) == -1)).tolist()
+    estimator = cluster.DBSCAN(eps=0.5, min_samples=8, metric='euclidean')
+    estimator.fit(raw_data*[1,0.5,1])# 增加y軸聚合
+    point_labels=estimator.labels_
+    index_erro_point = np.squeeze(np.where(np.array(point_labels) == -1)).tolist()
+    try:
+
+        print("點雲數量:{}, 雜點數量：{}".format(len(point_labels),len(index_erro_point)))
+    except:
+        print((index_erro_point).tolist())
+    # print(point_labels)
+    # print("datalen:{},noiselen:{}".format(len(raw_data),len(point_labels)))
 
 
 def serialConfig(configFileName, dataPortName, userPortName):
@@ -147,11 +161,16 @@ def readAndParseData(Dataport):
                 # Pack to List with pointCloud(spherical)
                 pointClouds.append([range_list, azimuth_list, elevation_list, doppler_list])
 
+
             # Cartesian coordinate system
             r = np.multiply(range_list[:], np.cos(elevation_list))
             x = np.multiply(r[:], np.sin(azimuth_list[:]))
             y = np.multiply(r[:], np.cos(azimuth_list[:]))
             z = np.multiply(range_list[:], np.sin(elevation_list))
+
+            data=np.concatenate((x,y,z),axis=1)
+            # print(data.shape)
+            dbfilter(data)
 
             # Feature Matrix preprocess(Voxalize)
             p_x_y, p_y_z, p_z_x = voxalize(50, 30, 50, x, y, z)
@@ -267,10 +286,8 @@ def check_results(new_results, new_probability, results, probability, pos_state,
 
 
 def plot_state(plot_data, plot_raw_data, savename, classes):
-
-
-    plt.plot(np.arange(len(plot_data)), plot_data,color = 'red',label = 'checked')
-    plt.plot(np.arange(len(plot_raw_data)), plot_raw_data,color = 'b',label = 'Unhecked')
+    plt.plot(np.arange(len(plot_data)), plot_data, color='red', label='checked')
+    plt.plot(np.arange(len(plot_raw_data)), plot_raw_data, color='b', label='Unhecked')
     plt.yticks(range(1, 8), classes)
     plt.ylim([0.0, 8.0])
     plt.xlabel("Frames")
@@ -340,7 +357,7 @@ def demo():
             else:
                 continue
             # print(sum(input_1.flatten()),sum(input_2.flatten()))
-            time.sleep(0.08)  # Sampling frequency of 30 Hz
+            time.sleep(0.1)  # Sampling frequency of 30 Hz
         except KeyboardInterrupt:
             Dataport.close()  # 清除序列通訊物件
             CLIport.write(('sensorStop\n').encode())
