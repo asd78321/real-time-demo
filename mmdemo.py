@@ -15,16 +15,18 @@ offset = 3
 def dbfilter(raw_data):
     index_erro_point = np.squeeze(np.where(np.array(raw_data) == -1)).tolist()
     estimator = cluster.DBSCAN(eps=0.5, min_samples=8, metric='euclidean')
-    estimator.fit(raw_data*[1,0.5,1])# 增加y軸聚合
-    point_labels=estimator.labels_
+    estimator.fit(raw_data * [1, 0.5, 1])  # 增加y軸聚合
+    point_labels = estimator.labels_
     index_erro_point = np.squeeze(np.where(np.array(point_labels) == -1)).tolist()
     try:
-
-        print("點雲數量:{}, 雜點數量：{}".format(len(point_labels),len(index_erro_point)))
+        print("點雲數量:{}, 雜點數量：{}".format(len(point_labels), len(index_erro_point)))
     except:
-        print((index_erro_point).tolist())
-    # print(point_labels)
-    # print("datalen:{},noiselen:{}".format(len(raw_data),len(point_labels)))
+        index_erro_point = [index_erro_point]
+        print("點雲數量:{}, 雜點數量：{}".format(len(point_labels), len(index_erro_point)))
+
+    data = np.delete(raw_data, index_erro_point, axis=0)
+
+    return data
 
 
 def serialConfig(configFileName, dataPortName, userPortName):
@@ -161,29 +163,33 @@ def readAndParseData(Dataport):
                 # Pack to List with pointCloud(spherical)
                 pointClouds.append([range_list, azimuth_list, elevation_list, doppler_list])
 
-
             # Cartesian coordinate system
             r = np.multiply(range_list[:], np.cos(elevation_list))
             x = np.multiply(r[:], np.sin(azimuth_list[:]))
             y = np.multiply(r[:], np.cos(azimuth_list[:]))
             z = np.multiply(range_list[:], np.sin(elevation_list))
 
-            data=np.concatenate((x,y,z),axis=1)
-            # print(data.shape)
-            dbfilter(data)
+            data = np.concatenate((x, y, z), axis=1)
+            denoise_point = dbfilter(data)
+            denoise_numPoint = numPoints - len(denoise_point)
 
             # Feature Matrix preprocess(Voxalize)
-            p_x_y, p_y_z, p_z_x = voxalize(50, 30, 50, x, y, z)
+            if denoise_numPoint > numPoints / 2:
+                p_x_y, p_y_z, p_z_x = voxalize(50, 30, 50, x, y, z)
+            else:
+                p_x_y, p_y_z, p_z_x = voxalize(50, 30, 50, denoise_point[:, 0], denoise_point[:, 1],
+                                               denoise_point[:, 2])
 
             # Frame Data not null from Serial-port
             isnull = 0
         else:
-            return [], [], [], [], 0, 1
+            isnull = 1
+            return [], [], [], [], 0, 0, isnull
+        return subFrameNum, p_x_y, p_y_z, p_z_x, numPoints, denoise_numPoint, isnull
 
-        return subFrameNum, p_x_y, p_y_z, p_z_x, numPoints, isnull
     else:
         isnull = 1
-        return [], [], [], [], 0, isnull
+        return [], [], [], [], 0, 0, isnull
 
     # ----------------------------------------------------------------------------------------------------------------------
 
@@ -272,17 +278,37 @@ def check_results(new_results, new_probability, results, probability, pos_state,
     if new_probability >= 0.6:
         results = new_results
         probability = new_probability
-        if new_results == classes[1] or new_results == classes[5]:
+        if new_results == classes[1] or new_results == classes[5]:  # warning
             pos_state = pos_states[1]
             fontcolor = fontcolors[1]
-        elif new_results == classes[4]:
+        elif new_results == classes[4] or new_results == classes[2]:  # alert
             pos_state = pos_states[2]
             fontcolor = fontcolors[2]
-        else:
+        else:   # normal
             pos_state = pos_states[0]
             fontcolor = fontcolors[0]
 
     return results, probability, pos_state, fontcolor
+
+
+def check_state(results, state):
+    human_states = ["standing", "sitting", "fall", "grow_up"]
+    classes = ["st_sit", "sit_st", "sit_lie", "lie_sit", "fall", "grow_up", "other"]
+
+    if results == classes[0]:
+        state = human_states[1]  # sitting
+    elif results == classes[1]:
+        state = human_states[0]  # standing
+    elif results == classes[2]:
+        state = human_states[2]  # fall from sitting
+    elif results == classes[3]:
+        state = human_states[1]  # sitting from fall
+    elif results == classes[4]:
+        state = human_states[2]  # fall
+    elif results == classes[5]:
+        state = human_states[3]  # grow_up
+    else:
+        pass  # other
 
 
 def plot_state(plot_data, plot_raw_data, savename, classes):
@@ -315,15 +341,16 @@ def demo():
     # Main process
     while True:
         try:
-            numframes, x, y, z, numPoints, isnull = readAndParseData(Dataport)
+            numframes, x, y, z, numPoints, denoise_numPoint, isnull = readAndParseData(Dataport)
             if isnull == 0:
 
                 input_1, input_2 = stack_data(numframes, x, y, input_1, input_2)
                 ret, Videoframe = cap.read()
 
                 # define Picture/Frame's information
-                cv2.putText(Videoframe, "Frames:{} Points:{}".format(numframes, numPoints), (10, 40),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(Videoframe, "Frames:{} Points:{} noise:{}".format(numframes, numPoints, denoise_numPoint),
+                            (10, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
                 cv2.putText(Videoframe, "Results:", (10, 80),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
                 cv2.putText(Videoframe, "{}({:.2f}%) {}".format(results, probabilty * 100, pos_state), (140, 80),
