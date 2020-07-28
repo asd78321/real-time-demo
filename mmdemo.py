@@ -278,13 +278,13 @@ def check_results(new_results, new_probability, results, probability, pos_state,
     if new_probability >= 0.6:
         results = new_results
         probability = new_probability
-        if new_results == classes[1] or new_results == classes[5]:  # warning
+        if new_results == classes[0] or new_results == classes[1] or new_results == classes[5]:  # warning for leaving site
             pos_state = pos_states[1]
             fontcolor = fontcolors[1]
-        elif new_results == classes[4] or new_results == classes[2]:  # alert
+        elif new_results == classes[4] :  # alert
             pos_state = pos_states[2]
             fontcolor = fontcolors[2]
-        else:   # normal
+        else:  # normal
             pos_state = pos_states[0]
             fontcolor = fontcolors[0]
 
@@ -292,7 +292,7 @@ def check_results(new_results, new_probability, results, probability, pos_state,
 
 
 def check_state(results, state):
-    human_states = ["standing", "sitting", "fall", "grow_up"]
+    human_states = ["standing", "sitting",'lie', "fall", "grow_up"]
     classes = ["st_sit", "sit_st", "sit_lie", "lie_sit", "fall", "grow_up", "other"]
 
     if results == classes[0]:
@@ -300,13 +300,13 @@ def check_state(results, state):
     elif results == classes[1]:
         state = human_states[0]  # standing
     elif results == classes[2]:
-        state = human_states[2]  # fall from sitting
+        state = human_states[2]  # lie
     elif results == classes[3]:
-        state = human_states[1]  # sitting from fall
+        state = human_states[1]  # sitting
     elif results == classes[4]:
-        state = human_states[2]  # fall
+        state = human_states[3]  # fall
     elif results == classes[5]:
-        state = human_states[3]  # grow_up
+        state = human_states[4]  # grow_up
     else:
         pass  # other
 
